@@ -106,7 +106,8 @@ def cmd_calibrate(cfg, prompts, a):
     done, _ = load_results(cfg)
     scores = {e: done[e]['judgments']['probability'] for e in rated if e in done}; labels = {e: bool(eps[e]['rater_critical']) for e in scores}
     if len(scores) < len(rated): print(f'Only {len(scores)}/{len(rated)} rated episodes scored; rerun calibrate before fitting.'); return
-    max_fa = cfg['target']['max_false_flags']; cut = fit(scores, labels, max_fa)
+    max_fa, min_c = cfg['target']['max_false_flags'], cfg['target']['min_caught']; cut = fit(scores, labels, max_fa)
+    if cut is None: raise SystemExit(f'No cut-off keeps false flags within {max_fa:.0%}; the screen cannot meet the target with {cfg["model"]}.')
     c, P, fa, N = curve(scores, labels, cut)
     print(f'\nCut-off for {cfg["model"]}: probability >= {cut}: caught {c}/{P} ({c / P:.0%}), false flags {fa}/{N} ({fa / N:.0%}), flagged {(c + fa) / len(scores):.0%}')
     print('Nearby cut-offs:')
@@ -122,17 +123,31 @@ def cmd_calibrate(cfg, prompts, a):
         tp += sum(scores[e] >= t for e in folds[i] if labels[e]); fp += sum(scores[e] >= t for e in folds[i] if not labels[e])
     print(f'Cross-validated estimate: caught {tp}/{P} ({tp / P:.0%}), false flags {fp / N:.0%}. '
           f"Study result with {cfg['locked_study_result']['model']}: {cfg['locked_study_result']['caught']} at {cfg['locked_study_result']['false_flags']}.")
-    if c / P < cfg['target']['aim_caught'] - 0.10: print('Warning: well below the 70% aim; review before running the full set.')
+    meets = c / P >= min_c and fa / N <= max_fa
+    if meets:
+        print(f'Meets the team target (at least {min_c:.0%} caught, at most {max_fa:.0%} false flags).')
+    else:
+        print(f'BELOW the team target: {c / P:.0%} caught is under {min_c:.0%} at {max_fa:.0%} false flags. "screen" will refuse to run.\n'
+              f'Options: switch to your own key with claude-sonnet-5-5 (study: 19/26 at 19%, cut-off 12; see README), '
+              f'or accept the shortfall with: python run.py screen --accept-below-target')
     CALIBRATION.write_text(json.dumps({'model': cfg['model'], 'cut_off': cut, 'caught': f'{c}/{P}', 'false_flags': f'{fa}/{N}',
-                                       'cross_validated': f'{tp}/{P} caught, {fp / N:.1%} false flags', 'max_false_flags': max_fa,
+                                       'caught_rate': round(c / P, 3), 'false_flag_rate': round(fa / N, 3), 'meets_target': meets,
+                                       'target': {'min_caught': min_c, 'max_false_flags': max_fa},
+                                       'cross_validated': f'{tp}/{P} caught, {fp / N:.1%} false flags',
                                        'time': time.strftime('%Y-%m-%dT%H:%M:%S')}, indent=2))
-    print(f'Saved {CALIBRATION.relative_to(ROOT)}. Next: python run.py screen')
+    print(f'Saved {CALIBRATION.relative_to(ROOT) if CALIBRATION.is_relative_to(ROOT) else CALIBRATION}.' + (' Next: python run.py screen' if meets else ''))
 
 def cut_off(cfg, a):
     if a.cut_off is not None: return a.cut_off
     if not CALIBRATION.exists(): raise SystemExit('Run python run.py calibrate first (or pass --cut-off).')
     cal = json.loads(CALIBRATION.read_text())
     if cal['model'] != cfg['model']: raise SystemExit(f"Calibration is for {cal['model']}, config uses {cfg['model']}; recalibrate.")
+    t = cfg['target']
+    if cal.get('target') != {'min_caught': t['min_caught'], 'max_false_flags': t['max_false_flags']}:
+        raise SystemExit('The target in config/screen.json changed since calibration; rerun python run.py calibrate.')
+    if not cal.get('meets_target') and not getattr(a, 'accept_below_target', False):
+        raise SystemExit(f"Calibration caught {cal['caught']} ({cal['caught_rate']:.0%}), below the {t['min_caught']:.0%} target at "
+                         f"{t['max_false_flags']:.0%} false flags. Not screening. Pass --accept-below-target to run anyway.")
     return cal['cut_off']
 
 def cmd_screen(cfg, prompts, a):
@@ -154,9 +169,20 @@ def cmd_report(cfg, prompts, a, cut=None):
     with open(out, 'w', newline='', encoding='utf-8') as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0])); w.writeheader(); w.writerows(rows)
     print(f"\n{cfg['model']}, probability >= {cut}: scored {len(rows)}/{len(eps)} episodes, spent ${spent:.2f}")
+    share = {}
     for src in ('rated', 'pool'):
         R = [r for r in rows if r['source'] == src]
-        if R: print(f"  {src}: flagged {sum(r['flagged'] == 'yes' for r in R)}/{len(R)} ({sum(r['flagged'] == 'yes' for r in R) / len(R):.0%})")
+        if R:
+            share[src] = sum(r['flagged'] == 'yes' for r in R) / len(R)
+            print(f"  {src}: flagged {sum(r['flagged'] == 'yes' for r in R)}/{len(R)} ({share[src]:.0%})")
+    R = [r for r in rows if r['rater_critical'] != 'not rated']
+    if R:
+        pos = [r for r in R if r['rater_critical'] == 'yes']; neg = [r for r in R if r['rater_critical'] == 'no']
+        c = sum(r['flagged'] == 'yes' for r in pos); f = sum(r['flagged'] == 'yes' for r in neg)
+        print(f"  rated episodes vs raters: caught {c}/{len(pos)} ({c / len(pos):.0%}), false flags {f}/{len(neg)} ({f / len(neg):.0%}); "
+              f"target at least {cfg['target']['min_caught']:.0%} caught, at most {cfg['target']['max_false_flags']:.0%} false flags")
+    if 'rated' in share and 'pool' in share and share['rated'] and not 0.5 <= share['pool'] / share['rated'] <= 2:
+        print('  Warning: the pool is flagged at a very different rate from the rated episodes; check the cut-off before relying on the list.')
     by = Counter((r['module'], r['flagged']) for r in rows)
     for m in sorted({r['module'] for r in rows}):
         n = by[(m, 'yes')] + by[(m, 'no')]; print(f'    module {m}: flagged {by[(m, "yes")]}/{n}')
@@ -168,6 +194,7 @@ def main():
     ap.add_argument('--max-usd', type=float, default=None, help='stop starting new calls at this total spend (default 15 calibrate, 150 screen)')
     ap.add_argument('--limit', type=int, help='screen: score only the first N episodes (rated first)')
     ap.add_argument('--cut-off', type=int, help='use this cut-off instead of outputs/calibration.json')
+    ap.add_argument('--accept-below-target', action='store_true', help='screen even if calibration caught fewer than 70%% of critical cases')
     a = ap.parse_args(); cfg, prompts = load_config()
     if a.max_usd is None: a.max_usd = 15.0 if a.command == 'calibrate' else 150.0
     {'status': cmd_status, 'test-call': cmd_test_call, 'calibrate': cmd_calibrate, 'screen': cmd_screen, 'report': cmd_report}[a.command](cfg, prompts, a)

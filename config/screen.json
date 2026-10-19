@@ -5,8 +5,8 @@
   "max_tokens": 8000,
   "prompt_files": {"system": "prompts/system.txt", "rubric": "prompts/critical_variant_B.txt", "format": "prompts/format_B.txt"},
   "rubric_sha256_16": "861b632c6fb3c117",
-  "target": {"max_false_flags": 0.20, "aim_caught": 0.70,
-             "note": "Team decision 2026-10-19: about 70% of critical cases caught at about 15-20% false flags."},
+  "target": {"max_false_flags": 0.20, "min_caught": 0.70,
+             "note": "Team decision 2026-10-19: at least 70% of the rated critical cases caught with at most 20% false flags. calibrate picks the cut-off that catches the most cases within 20% false flags; screen refuses to run if that cut-off catches fewer than 70% (override: --accept-below-target)."},
   "locked_study_result": {
     "model": "claude-sonnet-5-5",
     "cut_off": 12,

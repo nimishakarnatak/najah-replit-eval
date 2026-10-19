@@ -8,9 +8,16 @@ definitions, base rate, and clarifications), one call per episode, flag when the
 In the study, with Claude Sonnet 5.5 and cut-off 12, it caught 19/26 critical cases (73%) at 19% false flags;
 cross-validated 65% at 18%.
 
+**Target (enforced in code).** At least **70%** of the rated critical cases caught with at most **20%** false flags
+(`config/screen.json` → `target`). `calibrate` picks the cut-off that catches the most rated critical cases within 20%
+false flags and records whether it reaches 70%; `screen` and `report` refuse to run when it does not, unless you pass
+`--accept-below-target`. `report` also prints the catch and false-flag rates on the rated episodes, and warns if the
+pool is flagged at a very different rate. Checked by `tests/test_target.py`.
+
 **Model note.** Replit-managed AI Integrations do not offer `claude-sonnet-5-5` (Replit docs, 2 Oct 2026), so this
 repo uses `claude-sonnet-5` (same price). Because the probability scale can differ between models, `calibrate` first
-scores the 300 rated episodes and refits the cut-off to the same target (most cases caught with ≤ 20% false flags).
+scores the 300 rated episodes and refits the cut-off to the target above. If `claude-sonnet-5` cannot reach 70% within
+20% false flags, use your own key with `claude-sonnet-5-5` (see the last section), which met it in the study.
 
 ## Files
 
@@ -23,6 +30,7 @@ scores the 300 rated episodes and refits the cut-off to the same target (most ca
 | `run.py` | `status`, `test-call`, `calibrate`, `screen`, `report` |
 | `prepare_data.py` | Builds the data parts on the study computer (not used on Replit) |
 | `tests/test_request.py` | Checks the requests and validation match the study run (synthetic episode, no API calls) |
+| `tests/test_target.py` | Checks the 70% / 20% target gate (synthetic scores, no API calls) |
 | `data/` | Encrypted conversation parts (`conversations-NNN.jsonl.gz.enc`), added by step 1 |
 | `outputs/` | Results, calibration and the review list (git-ignored) |
 
@@ -62,7 +70,7 @@ git push -u origin main
 ```bash
 python run.py status          # data counts, credentials ("Replit-managed"), progress, spend
 python run.py test-call       # one call, about $0.03
-python run.py calibrate       # 300 rated episodes, about $9; prints the refitted cut-off and a cross-validated estimate
+python run.py calibrate       # 300 rated episodes, about $9; refits the cut-off and checks the 70% / 20% target
 python run.py screen          # the remaining 3,263 episodes, about $90-100; stops at --max-usd (default 150)
 python run.py report          # outputs/critical-screen-flags.csv, flagged episodes first
 ```
