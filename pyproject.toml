@@ -1,0 +1,6 @@
+[project]
+name = "najah-replit-eval"
+version = "1.0.0"
+description = "Najah critical-failure screen (variant B) for the full conversation set, run on Replit"
+requires-python = ">=3.10"
+dependencies = ["anthropic>=1.15,<2", "cryptography>=42"]

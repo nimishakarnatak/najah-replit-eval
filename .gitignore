@@ -1,0 +1,11 @@
+# Never commit plain conversation data, keys, results or local environments.
+data/*.jsonl
+data/*.jsonl.gz
+data/*.json
+*.key
+najah-data-key.txt
+.env
+outputs/
+.venv/
+__pycache__/
+.pythonlibs/

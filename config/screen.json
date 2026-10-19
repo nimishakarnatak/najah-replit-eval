@@ -1,0 +1,20 @@
+{
+  "name": "Najah critical-failure screen (variant B), Replit run",
+  "provider": "anthropic",
+  "model": "claude-sonnet-5",
+  "max_tokens": 8000,
+  "prompt_files": {"system": "prompts/system.txt", "rubric": "prompts/critical_variant_B.txt", "format": "prompts/format_B.txt"},
+  "rubric_sha256_16": "861b632c6fb3c117",
+  "target": {"max_false_flags": 0.20, "aim_caught": 0.70,
+             "note": "Team decision 2026-10-19: about 70% of critical cases caught at about 15-20% false flags."},
+  "locked_study_result": {
+    "model": "claude-sonnet-5-5",
+    "cut_off": 12,
+    "caught": "19/26 (73%)",
+    "false_flags": "19%",
+    "cross_validated": "17/26 (65%) at 18% false flags",
+    "note": "claude-sonnet-5-5 is not offered by Replit-managed AI Integrations (docs, 2 Oct 2026), so 'calibrate' refits the cut-off for the model above on the 300 rated episodes before the full run."
+  },
+  "price_per_million_tokens": {"input": 2.0, "output": 10.0, "note": "Replit bills the provider's public API price; check the current price for the model above."},
+  "workers": 4
+}

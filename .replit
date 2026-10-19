@@ -1,0 +1,2 @@
+modules = ["python-3.11"]
+run = "python run.py status"
