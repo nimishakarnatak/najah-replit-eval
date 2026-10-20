@@ -1,0 +1,352 @@
+## Summary
+
+We have built an evaluation process to answer:
+
+> **Which AI judge catches the most genuinely critical conversations while incorrectly flagging no more than about 20% of noncritical conversations?**
+
+This has involved preparing human reference labels, running several judge configurations, selecting decision thresholds, analysing the errors, and expanding screening to the full dataset.
+
+**The clearest result so far:** among the two configurations with complete, valid labelled evaluations, **Opus medium performs slightly better than Sonnet baseline after threshold calibration**. We cannot yet fairly rank the maximum-thinking configurations because some of their outputs remain invalid.
+
+**An important new update:** Sonnet baseline has now attempted the entire full dataset, but **one invalid output is blocking completion and the next queued run**.
+
+---
+
+## 1. We separated two different evaluation questions
+
+There have been two stages of work, which should not be confused.
+
+### Earlier stage: agreement with human ratings
+The original study assessed how closely OpenAI and Claude judges matched humans across a broader set of ratings and task outcomes.
+
+You asked us to use a conservative human-reference rule:
+- For numeric ratings, take the **lowest concrete rating** supplied by any available human rater.
+- For failure flags, **any human “yes” wins**.
+- For task outcomes, use the **least-complete substantive outcome**.
+- Do not turn missing or “cannot determine” ratings into invented answers.
+
+**Rationale:** you wanted the evaluation to reflect problems noticed by any human reviewer, rather than averaging them away.
+
+**Limitation:** this produces a deliberately conservative reference, not necessarily a consensus adjudication. Those results remain separate from an independently adjudicated final reference.
+
+### Current stage: critical-case screening
+The newer evaluation focuses specifically on whether an episode contains a critical failure.
+
+Its main measures are:
+1. How many human-labelled critical episodes the model catches.
+2. How many human-labelled noncritical episodes it incorrectly flags.
+
+**Rationale:** overall agreement can look good while a model misses the rare cases you care most about. Critical-case detection is a more direct measure of the operational objective.
+
+The current imported critical-screen labels were checked against the available primary human ratings. We did **not** use a model’s predictions as its own ground truth.
+
+---
+
+## 2. We distinguished labelled evaluation from unlabelled screening
+
+The dataset contains:
+
+| Portion | Episodes | What we can measure |
+|---|---:|---|
+| Human-labelled subset | **300** | Critical detection and false flags |
+| Additional unlabelled pool | **3,263** | Model flags for human review |
+| **Total** | **3,563** | Full-dataset screening progress |
+
+Within the 300 labelled episodes:
+- **26 are critical**
+- **274 are noncritical**
+
+**Rationale:** human labels are necessary to establish whether a prediction is right or wrong.
+
+For the unlabelled pool, we can say “the model flagged this episode,” but we cannot yet say:
+- it is a confirmed critical case;
+- it is a false positive;
+- the model achieved a particular accuracy or recall.
+
+This distinction is reflected in the UI.
+
+---
+
+## 3. We established the comparison objective
+
+You confirmed this objective:
+
+> **Maximise critical detection while keeping false flags at or below 20%.**
+
+The denominators matter:
+
+| Metric | Calculation |
+|---|---|
+| Critical detection rate | Critical episodes flagged ÷ all human-critical episodes |
+| False-flag rate | Noncritical episodes flagged ÷ all human-noncritical episodes |
+
+For example, **49 / 274 = 17.9% false flags** means that 17.9% of the noncritical episodes were incorrectly flagged. It does **not** mean that only 17.9% of the model’s flagged episodes were wrong.
+
+**Rationale:** without a false-flag constraint, a model could catch every critical episode simply by flagging everything. The constraint forces a useful tradeoff.
+
+---
+
+## 4. We ran four Claude configurations
+
+The current critical-screen comparison uses Replit-managed Anthropic access, without a personal-key fallback.
+
+| Configuration | Reasoning setting | Output token cap |
+|---|---|---:|
+| Sonnet 5.5 baseline | Provider default | 8,000 |
+| Sonnet 5.5 maximum | Adaptive, maximum effort | 16,000 |
+| Opus 5.5 medium | Adaptive, medium effort | 16,000 |
+| Opus 5.5 maximum | Adaptive, maximum effort | 16,000 |
+
+**Rationale:**
+- **Sonnet baseline** provides a faster reference point.
+- **Sonnet maximum** tests whether more reasoning improves the same model’s screening.
+- **Opus medium** tests a larger model without the maximum reasoning cost.
+- **Opus maximum** tests whether the most intensive configuration improves coverage enough to justify its additional time and cost.
+
+We kept the screening prompts and data fixed and recorded configuration fingerprints to make changes detectable.
+
+**Important qualification:** this is a comparison of complete configurations, not a perfectly isolated experiment on reasoning effort. The baseline also has a different output cap. A token cap is a maximum allowance—not the number of tokens necessarily used.
+
+The current critical-screen comparison does **not** include a new OpenAI run; the earlier OpenAI work belongs to the broader human-agreement study.
+
+---
+
+## 5. We required valid, evidence-backed outputs
+
+The judge produces a structured result containing:
+- a critical/noncritical decision;
+- a numeric criticality score from 0–100;
+- failure categories;
+- evidence turn references;
+- a short explanation.
+
+The pipeline checks that the response is usable. For example:
+- the response must parse correctly;
+- the score must be within range;
+- failure categories must be recognised;
+- evidence references must point to existing turns;
+- a critical “yes” must include evidence;
+- an interrupted or unfinished response is not accepted as a completed judgement.
+
+**Rationale:** an invalid output must not silently become “no critical failure,” because that would make a broken judge appear safer than it is.
+
+Successful outputs are saved and reused. Failed attempts are retained for audit, and retries do not overwrite valid results.
+
+### What happened with retries
+Sonnet maximum initially had **23 invalid outputs**.
+
+You authorised a retry pass in parallel with the other work:
+- **7 were repaired**
+- **16 remain invalid**
+- Sonnet maximum now has **284 / 300 valid labelled results**
+
+The repair process originally stopped at the first repeated validation failure. We changed it to continue through the remaining failed episodes while preserving unresolved failures.
+
+**What we have not established yet:** the specific cause of all remaining invalid outputs. It would be premature to attribute them to insufficient tokens, malformed JSON, or unsupported evidence without inspecting the failures.
+
+---
+
+## 6. We calibrated the decision threshold—not the model’s weights
+
+For the current critical-screen study, “calibration” means selecting the score at which an episode should be flagged.
+
+For example:
+- At threshold **12**, scores of 12 or higher are flagged.
+- At threshold **20**, scores of 20 or higher are flagged.
+
+Lower thresholds generally catch more critical episodes but also create more false flags. Higher thresholds generally reduce false flags but miss more critical episodes.
+
+We evaluated every integer threshold from **0 to 101**:
+- 0 flags every valid scored episode.
+- 101 flags none.
+
+**Rationale:** this shows the full tradeoff rather than reporting one arbitrary operating point.
+
+This is **decision-threshold calibration**. We have not demonstrated that a model score of “20” corresponds to a statistically calibrated 20% probability of a critical failure.
+
+---
+
+## 7. We separated fitted results from held-out results
+
+There are two types of threshold results.
+
+### A. Full-data threshold sweep
+We evaluate thresholds against all 300 labelled episodes.
+
+**Use:** exploring tradeoffs and identifying a potential deployment threshold.
+
+**Limitation:** choosing and evaluating a threshold on the same labels can make performance look better than it will be on new cases.
+
+### B. Five-fold, participant-grouped cross-validation
+For a more credible estimate:
+1. Divide the labelled episodes into five groups.
+2. Keep episodes from the same participant together.
+3. Select the threshold using four groups.
+4. Evaluate it on the fifth, unseen group.
+5. Repeat and combine the held-out predictions.
+
+Threshold selection:
+- maximises critical detections;
+- respects the 20% false-flag cap on the training portion;
+- breaks ties by preferring fewer false flags, then a higher threshold.
+
+**Rationale:** this prevents an episode’s label from selecting the threshold used to evaluate that episode. Grouping by participant reduces leakage between related conversations.
+
+**Limitations:**
+- A 20% training cap does not guarantee a 20% held-out rate.
+- Comparing models and choosing the best using these same results introduces additional selection bias.
+- These are retrospective cross-validation results—not a fresh, untouched final test set.
+
+---
+
+## 8. What the completed results show
+
+### At the original fixed threshold of 12
+
+| Model | Critical episodes caught | Noncritical episodes incorrectly flagged |
+|---|---:|---:|
+| Sonnet baseline | **17 / 26 — 65.4%** | **56 / 274 — 20.4%** |
+| Opus medium | **21 / 26 — 80.8%** | **112 / 274 — 40.9%** |
+
+**Interpretation:** Opus medium catches more critical cases at this threshold, but produces far too many false flags for the chosen constraint. Sonnet baseline also narrowly exceeds 20%.
+
+This demonstrates why comparing models at the same numeric threshold is not enough: their score distributions differ.
+
+### After held-out threshold calibration targeting a 20% false-flag cap
+
+| Model | Critical episodes caught | Critical episodes missed | Noncritical episodes incorrectly flagged |
+|---|---:|---:|---:|
+| Sonnet baseline | **15 / 26 — 57.7%** | **11 / 26 — 42.3%** | **51 / 274 — 18.6%** |
+| Opus medium | **16 / 26 — 61.5%** | **10 / 26 — 38.5%** | **49 / 274 — 17.9%** |
+
+**Interpretation:** Opus medium currently catches **one more critical episode** and generates **two fewer false flags**.
+
+That is a modest observed advantage, not proof of a substantial or statistically reliable improvement. There are only 26 critical episodes, so one episode changes detection by approximately **3.8 percentage points**.
+
+Neither configuration is yet catching all, or nearly all, critical cases under the selected constraint.
+
+### Maximum-thinking models
+- Sonnet maximum: **284 valid, 16 invalid**
+- Opus maximum: **286 valid, 14 invalid**
+
+We have withheld a final calibrated ranking for them.
+
+**Rationale:** evaluating only the valid outputs could bias the comparison, especially if difficult or critical episodes are more likely to produce invalid responses.
+
+---
+
+## 9. We added analysis of what the models catch and miss
+
+The analysis now examines:
+- true positives: critical episodes caught;
+- false negatives: critical episodes missed;
+- false positives: noncritical episodes flagged;
+- patterns by human failure category;
+- patterns by module;
+- results at multiple thresholds;
+- held-out calibrated operating points.
+
+You also asked us to unpack **“Other serious failure”** instead of leaving it as one broad category.
+
+We added more specific descriptions, including:
+- repetition loops;
+- no usable job opportunities;
+- CV not delivered;
+- forgetting a company name;
+- ignoring a language request;
+- routing or scheduling problems;
+- lack of actionable help.
+
+The tables include the corresponding human explanations and available evidence references.
+
+**Rationale:** aggregate detection rates tell us whether a judge is useful; error analysis helps explain where it fails and what to improve.
+
+**Cautions:**
+- The detailed subcategories are analyst-derived groupings, not newly collected human ratings.
+- Categories can overlap.
+- Catching an episode does not necessarily mean the model identified the correct failure subtype.
+- Some model outputs have no retained failure category even when a chosen probability threshold flags them; we show that missingness rather than inventing a category.
+- Language labels are unavailable for meaningful language comparisons in the current metadata.
+
+---
+
+## 10. We built a progress and results UI
+
+The dashboard shows:
+- progress for each configuration;
+- valid, failed and pending outputs;
+- separate labelled and unlabelled counts;
+- critical detections and false flags as **both counts and percentages**;
+- threshold tradeoff tables;
+- completed-run error analysis;
+- downloadable results and a progress document.
+
+It refreshes from saved outputs rather than launching evaluation requests.
+
+**Rationale:** you can monitor long-running jobs without accidentally duplicating expensive calls. The analyst-facing results also remain separate from the blinded human-rating workflow.
+
+---
+
+## 11. We expanded to the full dataset and implemented your queue order
+
+The requested schedule is:
+
+**Sonnet baseline → Sonnet maximum → Opus medium**
+
+With **Opus maximum running independently in parallel**.
+
+Matching labelled outputs are reused rather than scored again.
+
+**Rationale:**
+- follow your priority order;
+- avoid duplicate spending;
+- preserve progress through restarts;
+- allow the slower Opus maximum run to make progress concurrently.
+
+We implemented a strict completion gate: the next queued model starts only when its prerequisite has valid results for the entire dataset.
+
+That protects against silently treating failures as completion, but it also means a single unresolved output can hold the queue.
+
+### Latest saved status: 12:39 pm UK time, 20 October
+
+| Model | Valid / 3,563 | Failed | Pending | Status |
+|---|---:|---:|---:|---|
+| Sonnet baseline | **3,562 — 99.97%** | 1 | 0 | **Blocked by one invalid output** |
+| Opus maximum | **588 — 16.5%** | 24 | 2,951 | Running |
+| Sonnet maximum | **284 — 8.0%** | 16 | 3,263 | Full-pool run queued |
+| Opus medium | **300 — 8.4%** | 0 | 3,263 | Full-pool run queued |
+
+The Sonnet maximum and Opus medium totals currently consist only of their existing labelled results.
+
+For the unlabelled pool, Sonnet baseline has flagged **475 / 3,262 valid scored episodes — 14.6%**, using the descriptive threshold of 12. These are **review candidates**, not confirmed critical cases.
+
+**Important:** the current full-dataset progress counters use threshold 12. They should not be interpreted as the final calibrated operating policy.
+
+---
+
+## 12. What remains, and why it matters
+
+### Immediate priorities
+1. **Resolve the one invalid Sonnet baseline output.**  
+   This is now blocking the full-dataset queue.
+
+2. **Diagnose the 16 Sonnet maximum and 14 Opus maximum labelled failures.**  
+   Repeated identical retries have already shown limited benefit. We need to understand the cause before changing settings or spending more.
+
+3. **Rerun calibration after valid labelled results are available.**  
+   The calibration watcher has stopped; it must be restarted or calibration invoked explicitly.
+
+### Then
+4. **Finish the queued full-dataset runs.**
+5. **Apply an explicitly selected calibrated threshold to the saved full-dataset scores.**  
+   Rescoring thresholds does not require new model calls.
+6. **Human-review a sample of flagged and unflagged pool episodes.**  
+   Reviewing only flagged cases cannot establish how many critical cases were missed.
+7. **Confirm the selected configuration on fresh human-labelled data.**  
+   This is necessary before treating the current retrospective result as a reliable deployment estimate.
+
+## Bottom line
+
+We now have a reproducible screening pipeline, threshold calibration, error analysis and a live dashboard. **Opus medium is the best of the two fully evaluated configurations so far, but only by a small margin.** The maximum-thinking configurations remain unranked because of invalid outputs, and the full-dataset queue is currently blocked by one Sonnet baseline failure.
+
+Shall I investigate the remaining invalid outputs, starting with the single baseline failure blocking the queue?
